@@ -138,9 +138,11 @@ void TypeEnvironmentAnalysis::updateTypeEnvironment(const AstProgram& program) {
                     typeDependencyGraph.insert(type->getQualifiedName(), "symbol");
                     break;
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     assert(false && "invalid type");
             }
-        } else if (dynamic_cast<const AstRecordType*>(cur) != nullptr) {
+        } else if ((dynamic_cast<const AstRecordType*>(cur) != nullptr)
+                || (dynamic_cast<const AstSumType*>(cur) != nullptr)) {
             // do nothing
         } else if (auto type = dynamic_cast<const AstUnionType*>(cur)) {
             for (const auto& subtype : type->getTypes()) {
