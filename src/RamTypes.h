@@ -31,6 +31,7 @@ enum class TypeAttribute {
     Unsigned,  // Unsigned number
     Float,     // Floating point number.
     Record,
+    Sum,
 };
 
 // Printing of the TypeAttribute Enum.
@@ -51,6 +52,11 @@ inline std::ostream& operator<<(std::ostream& os, TypeAttribute T) {
             break;
         case TypeAttribute::Record:
             os << "TypeAttribute::Record";
+        case TypeAttribute::Sum:
+            return os << "TypeAttribute::Sum";
+        default:
+            std::cerr << "unhandled `TypeAttribute` variant: " << size_t(T);
+            exit(EXIT_FAILURE);
     }
     return os;
 }
@@ -66,9 +72,13 @@ inline bool isNumericType(TypeAttribute ramType) {
             return true;
         case TypeAttribute::Symbol:
         case TypeAttribute::Record:
+        case TypeAttribute::Sum:
             return false;
+        default:
+            std::cerr << "unhandled `TypeAttribute` variant: " << size_t(ramType);
+            exit(EXIT_FAILURE);
     }
-    return false;  // silence warning
+    return false;
 }
 
 /**

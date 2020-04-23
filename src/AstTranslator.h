@@ -84,6 +84,9 @@ private:
     /** Record types information - used in Ram for I/O. */
     Json RamRecordTypes;
 
+    /** Sum type information - used in Ram for I/O. */
+    Json ramSumTypes;
+
     /** Symbol Table **/
     SymbolTable symbolTable;
 
@@ -422,6 +425,11 @@ private:
 
         assert(false && "Unaccounted-for constant");
     }
+
+    /**
+     * Get ram sum types.
+     */
+    const Json getSumTypes();
 
     /** translate RAM code for a constant value */
     std::unique_ptr<RamExpression> translateConstant(AstConstant const& c);

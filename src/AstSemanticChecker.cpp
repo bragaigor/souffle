@@ -79,7 +79,7 @@ private:
     void checkArgument(const AstArgument& arg);
     void checkConstant(const AstArgument& argument);
     void checkFact(const AstClause& fact);
-    void checkClause(const AstClause& clause);
+    void checkClause(const AstClause& clause, const TypeEnvironment& typeEnv);
     void checkRelationDeclaration(const AstRelation& relation);
     void checkRelation(const AstRelation& relation);
 
@@ -88,6 +88,7 @@ private:
     void checkType(const AstType& type);
     void checkRecordType(const AstRecordType& type);
     void checkUnionType(const AstUnionType& type);
+    void checkSumType(const AstSumType& type);
 
     void checkNamespaces();
     void checkIO();
@@ -138,7 +139,7 @@ AstSemanticCheckerImpl::AstSemanticCheckerImpl(AstTranslationUnit& tu) : tu(tu) 
 
     // check rules
     for (auto* rel : program.getRelations()) checkRelation(*rel);
-    for (auto* clause : program.getClauses()) checkClause(*clause);
+    for (auto* clause : program.getClauses()) checkClause(*clause, typeEnv);
 
     checkNamespaces();
     checkIO();
@@ -230,6 +231,10 @@ AstSemanticCheckerImpl::AstSemanticCheckerImpl(AstTranslationUnit& tu) : tu(tu) 
         }
     });
 
+    // TODO (#467) remove the next line to enable subprogram compilation for record types
+    // (sum types desugar to records)
+    visitDepthFirst(nodes, [&](const AstSumType& cnst) { Global::config().unset("engine"); });
+
     // type casts name a valid type
     visitDepthFirst(nodes, [&](const AstTypeCast& cast) {
         if (!typeEnv.isType(cast.getType())) {
@@ -257,6 +262,7 @@ AstSemanticCheckerImpl::AstSemanticCheckerImpl(AstTranslationUnit& tu) : tu(tu) 
                     report.addError("Non-symbolic use for symbolic functor", fun.getSrcLoc());
                     break;
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     assert(false && "Invalid return type");
             }
         }
@@ -285,6 +291,7 @@ AstSemanticCheckerImpl::AstSemanticCheckerImpl(AstTranslationUnit& tu) : tu(tu) 
                         report.addError("Non-float argument for functor", arg->getSrcLoc());
                         break;
                     case TypeAttribute::Record:
+                    case TypeAttribute::Sum:
                         assert(false && "Invalid argument type");
                 }
             }
@@ -427,6 +434,9 @@ static bool hasUnnamedVariable(const AstArgument* arg) {
     }
     if (const auto* term = dynamic_cast<const AstTerm*>(arg)) {
         return any_of(term->getArguments(), hasUnnamedVariable);
+    }
+    if (const auto* si = dynamic_cast<const AstSumInit*>(arg)) {
+        return hasUnnamedVariable(si->getArgument());
     }
     if (dynamic_cast<const AstAggregator*>(arg) != nullptr) {
         return false;
@@ -609,6 +619,8 @@ void AstSemanticCheckerImpl::checkConstant(const AstArgument& argument) {
         for (auto* arg : ri->getArguments()) {
             checkConstant(*arg);
         }
+    } else if (auto* si = dynamic_cast<const AstSumInit*>(&argument)) {
+        checkConstant(*si->getArgument());
     } else {
         std::cout << "Unsupported Argument: " << typeid(argument).name() << "\n";
         assert(false && "Unknown case");
@@ -635,13 +647,47 @@ void AstSemanticCheckerImpl::checkFact(const AstClause& fact) {
     }
 }
 
-void AstSemanticCheckerImpl::checkClause(const AstClause& clause) {
+void AstSemanticCheckerImpl::checkClause(const AstClause& clause, const TypeEnvironment& typeEnv) {
     // check head atom
     checkAtom(*clause.getHead());
 
     // check for absence of underscores in head
     if (hasUnnamedVariable(clause.getHead())) {
         report.addError("Underscore in head of rule", clause.getHead()->getSrcLoc());
+    }
+
+    // check that record inits have a specified record type
+    for (const AstRecordInit* cur : getRecords(clause)) {
+        if (!cur->type) continue;
+
+        if (!typeEnv.isType(*cur->type)) {
+            std::ostringstream msg;
+            msg << "Unknown type: `" << *cur->type << "`";
+            report.addError(msg.str(), cur->getSrcLoc());
+        } else if (!dynamic_cast<const RecordType*>(&typeEnv.getType(*cur->type))) {
+            std::ostringstream msg;
+            msg << "`" << *cur->type << "` is not a record type";
+            report.addError(msg.str(), cur->getSrcLoc());
+        }
+    }
+
+    // check that sum inits have a specified sum type
+    for (auto&& cur : getSums(clause)) {
+        if (!typeEnv.isType(cur->type)) {
+            std::ostringstream msg;
+            msg << "Unknown type: `" << cur->type << "`";
+            report.addError(msg.str(), cur->getSrcLoc());
+        } else if (auto&& ty = dynamic_cast<const SumType*>(&typeEnv.getType(cur->type))) {
+            if (!any_of(ty->getBranches(), [&](auto&& br) { return br.name == cur->getBranch(); })) {
+                std::ostringstream msg;
+                msg << "`" << cur->getBranch() << "` is not a branch of `" << cur->type << "`";
+                report.addError(msg.str(), cur->getSrcLoc());
+            }
+        } else {
+            std::ostringstream msg;
+            msg << "`" << cur->type << "` is not a sum type";
+            report.addError(msg.str(), cur->getSrcLoc());
+        }
     }
 
     // check body literals
@@ -779,6 +825,30 @@ void AstSemanticCheckerImpl::checkUnionType(const AstUnionType& type) {
     }
 }
 
+void AstSemanticCheckerImpl::checkSumType(const AstSumType& type) {
+    // check proper definition of all field types
+    for (auto&& br : type.getBranches()) {
+        if (br.type != "number" && br.type != "symbol" && !getType(program, br.type)) {
+            report.addError("Undefined type " + toString(br.type) + " in definition of sum branch " + br.name,
+                    type.getSrcLoc());
+        }
+    }
+
+    // check that branch names are unique
+    auto& branches = type.getBranches();
+    const auto numBranches = branches.size();
+    for (std::size_t i = 0; i < numBranches; i++) {
+        auto& cur_name = branches[i];
+        for (std::size_t j = 0; j < i; j++) {
+            if (branches[j] == cur_name) {
+                report.addError("Doubly defined branch name " + toString(cur_name) +
+                                        " in definition of sum-type " + toString(type.getQualifiedName()),
+                        type.getSrcLoc());
+            }
+        }
+    }
+}
+
 void AstSemanticCheckerImpl::checkRecordType(const AstRecordType& type) {
     // check proper definition of all field types
     for (const auto& field : type.getFields()) {
@@ -806,6 +876,8 @@ void AstSemanticCheckerImpl::checkRecordType(const AstRecordType& type) {
 void AstSemanticCheckerImpl::checkType(const AstType& type) {
     if (const auto* u = dynamic_cast<const AstUnionType*>(&type)) {
         checkUnionType(*u);
+    } else if (const auto* r = dynamic_cast<const AstSumType*>(&type)) {
+        checkSumType(*r);
     } else if (const auto* r = dynamic_cast<const AstRecordType*>(&type)) {
         checkRecordType(*r);
     }
@@ -1495,6 +1567,13 @@ void GroundedTermsChecker::verify(AstTranslationUnit& translationUnit) {
         for (auto&& cur : getRecords(clause)) {
             if (!isGrounded[cur]) {
                 report.addError("Ungrounded record", cur->getSrcLoc());
+            }
+        }
+
+	// all sums need to be grounded
+        for (auto&& cur : getSums(clause)) {
+            if (!isGrounded[cur]) {
+                report.addError("Ungrounded sum type", cur->getSrcLoc());
             }
         }
     });
