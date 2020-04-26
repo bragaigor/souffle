@@ -68,6 +68,9 @@ protected:
             case 'r':
                 outputRecord(destination, value, type);
                 break;
+            case '+':
+                outputSum(destination, value, type);
+                break;
             default:
                 fatal("unsupported type attribute: `%c`", type[0]);
         }

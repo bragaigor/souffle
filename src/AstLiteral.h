@@ -154,7 +154,7 @@ protected:
     }
 
     bool equal(const AstNode& node) const override {
-        assert(nullptr != dynamic_cast<const AstNegation*>(&node));
+        assert(isA<const AstNegation>(node));
         const auto& other = static_cast<const AstNegation&>(node);
         return equal_ptr(atom, other.atom);
     }
@@ -216,7 +216,7 @@ protected:
     }
 
     bool equal(const AstNode& node) const override {
-        assert(nullptr != dynamic_cast<const AstBooleanConstraint*>(&node));
+        assert(isA<const AstBooleanConstraint>(node));
         const auto& other = static_cast<const AstBooleanConstraint&>(node);
         return truthValue == other.truthValue;
     }
@@ -279,7 +279,7 @@ protected:
     }
 
     bool equal(const AstNode& node) const override {
-        assert(nullptr != dynamic_cast<const AstBinaryConstraint*>(&node));
+        assert(isA<const AstBinaryConstraint>(node));
         const auto& other = static_cast<const AstBinaryConstraint&>(node);
         return operation == other.operation && equal_ptr(lhs, other.lhs) && equal_ptr(rhs, other.rhs);
     }

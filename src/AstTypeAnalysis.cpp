@@ -118,6 +118,7 @@ TypeConstraint isSubtypeOf(const TypeVar& variable, const Type& type) {
 
             // remove all types that are not sub-types of b
             if (assignment.isAll()) {
+                printf("Assigning type: %s\n", type.getName().toString().c_str());
                 assignment = TypeSet(type);
                 return true;
             }
@@ -366,6 +367,51 @@ TypeConstraint isSubtypeOfComponent(
 
     return std::make_shared<C>(elementVariable, recordVariable, index);
 }
+
+TypeConstraint isRecordWithArity(const TypeVar& a, size_t arity) {
+    struct C : public Constraint<TypeVar> {
+        TypeVar a;
+        size_t arity;
+
+        C(TypeVar a, size_t arity) : a(std::move(a)), arity(arity) {}
+
+        bool update(Assignment<TypeVar>& ass) const override {
+            // get list of types for b
+            const TypeSet& recs = ass[a];
+
+            // if it is (not yet) constrainted => skip
+            if (recs.isAll()) {
+                return false;
+            }
+
+            // compute new types for a and b
+            TypeSet types;
+
+            // iterate through types of b
+            for (const Type& t : recs) {
+                // only retain records
+                if (auto p = dynamic_cast<const RecordType*>(&t)) {
+                    if (p->getFields().size() == arity) {
+                        types.insert(t);
+                    }
+                }
+            }
+
+            // update values
+            const bool changed = ass[a] != types;
+            if (changed) ass[a] = types;
+
+            // done
+            return changed;
+        }
+
+        void print(std::ostream& out) const override {
+            out << a << " <: record/" << arity;
+        }
+    };
+
+    return std::make_shared<C>(a, arity);
+}
 }  // namespace
 
 /* Return a new clause with type-annotated variables */
@@ -587,8 +633,34 @@ private:
 
     void visitRecordInit(const AstRecordInit& record) override {
         auto arguments = record.getArguments();
+
+        auto rec = getVar(record);
+        addConstraint(isRecordWithArity(rec, record.getArguments().size()));
+
         for (size_t i = 0; i < arguments.size(); ++i) {
             addConstraint(isSubtypeOfComponent(getVar(arguments[i]), getVar(record), i));
+        }
+ 
+        // might not have this info due to malformed program.
+         if (record.type && typeEnv.isType(*record.type)) {
+            auto&& ty = typeEnv.getType(*record.type);
+            addConstraint(isSubtypeOf(rec, ty));
+         }
+    }
+
+    void visitSumInit(const AstSumInit& init) override {
+        auto const ty =
+                dynamic_cast<const SumType*>(typeEnv.isType(init.type) ? &typeEnv.getType(init.type) : nullptr);
+        if (!ty) return;  // might not have this info due to malformed program.
+
+        auto rec = getVar(init);
+        addConstraint(isSubtypeOf(rec, *ty));
+
+        for (auto&& br : ty->getBranches()) {
+            if (br.name != init.getBranch()) continue;
+
+             addConstraint(isSubtypeOf(getVar(init.getArgument()), br.type));
+             break;  // first branch name match is enough; branches may not have overlapping names
         }
     }
 

@@ -890,6 +890,7 @@ void Synthesiser::emitCode(std::ostream& out, const RamStatement& stmt) {
 
                 case TypeAttribute::Symbol:
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     type = "RamDomain";
                     break;
             }
@@ -1060,6 +1061,7 @@ void Synthesiser::emitCode(std::ostream& out, const RamStatement& stmt) {
 
                 case TypeAttribute::Symbol:
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     type = "RamDomain";
                     break;
             }
@@ -1668,6 +1670,7 @@ void Synthesiser::emitCode(std::ostream& out, const RamStatement& stmt) {
                         out << ").c_str()";
                         break;
                     case TypeAttribute::Record:
+                    case TypeAttribute::Sum:
                         fatal("unhandled type");
                 }
             }
@@ -1790,6 +1793,7 @@ void Synthesiser::generateCode(std::ostream& os, const std::string& id, bool& wi
                 case TypeAttribute::Symbol:
                     return "const char *";
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     fatal("records cannot be used by user-defined functors");
             }
 

@@ -23,6 +23,8 @@ std::ostream& operator<<(std::ostream& os, TypeAttribute T) {
             return os << "TypeAttribute::Unsigned";
         case TypeAttribute::Record:
             return os << "TypeAttribute::Record";
+        case TypeAttribute::Sum:
+            return os << "TypeAttribute::Sum";
     }
 
     fatal("unhandled `TypeAttribute`");
@@ -36,6 +38,7 @@ bool isNumericType(TypeAttribute ramType) {
             return true;
         case TypeAttribute::Symbol:
         case TypeAttribute::Record:
+        case TypeAttribute::Sum:
             return false;
     }
 

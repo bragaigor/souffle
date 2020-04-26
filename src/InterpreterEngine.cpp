@@ -515,6 +515,8 @@ RamDomain InterpreterEngine::execute(const InterpreterNode* node, InterpreterCon
                         break;
                     case TypeAttribute::Record:
                         fatal("Record support is not implemented");
+                    case TypeAttribute::Sum:
+                        fatal("Sum support is not implemented");
                 }
             }
 
@@ -535,6 +537,7 @@ RamDomain InterpreterEngine::execute(const InterpreterNode* node, InterpreterCon
                     codomain = &FFI_RamFloat;
                     break;
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     fatal("Not implemented");
             }
 
@@ -561,6 +564,7 @@ RamDomain InterpreterEngine::execute(const InterpreterNode* node, InterpreterCon
                     result = ramBitCast(static_cast<RamFloat>(rc));
                     break;
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     fatal("Not implemented");
             }
 

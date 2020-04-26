@@ -77,6 +77,7 @@ protected:
                 case TypeAttribute::Unsigned:
                     return "unsigned";
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     fatal("unhandled `TypeAttribute`");
             }
 

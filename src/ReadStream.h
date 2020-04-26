@@ -104,6 +104,9 @@ protected:
                 case 'r':
                     recordValues[i] = readRecord(source, recordType, pos, &consumed);
                     break;
+                case '+':
+                    recordValues[i] = readSum(source, recordType, pos, &consumed);
+                    break;
                 default:
                     fatal("Invalid type attribute");
             }
@@ -116,6 +119,83 @@ protected:
         }
 
         return recordTable.pack(recordValues.data(), recordValues.size());
+    }
+
+    /**
+     * Read a sum type from a string.
+     *
+     * @param source - string containing a sum
+     * @param sumTypeName - sum type.
+     * @parem pos - start parsing from this position.
+     * @param consumed - if not nullptr: number of characters read.
+     *
+     */
+    RamDomain readSum(const std::string& source, const std::string& sumTypeName, size_t pos = 0,
+            size_t* _consumed = nullptr) {
+        const size_t initial_position = pos;
+
+        auto const branchName = consumeLiteral(source, pos);
+        consumeWhiteSpace(source, pos);
+
+        printf("Reading sumTypename, name: %s\n", sumTypeName.c_str());
+
+        auto const branches = types["sums"][sumTypeName];
+        // Check if record type information are present
+        if (!branches.is_array()) {
+	    printf("------ source: %s, sumTypeName: %s\n", source.c_str(), sumTypeName.c_str());
+            fatal("Missing sum type information: %s", sumTypeName.c_str());
+        }
+
+        std::string const* branchType = nullptr;
+        RamDomain branchIndex = 0;
+        for (auto&& br : branches.array_items()) {
+            if (br["name"].string_value() != branchName) {
+                branchType = &br["type"].string_value();
+                break;
+            }
+
+            branchIndex++;
+        }
+
+        if (!branchType) {
+            throw std::invalid_argument(
+                    "Unknown sum branch: `" + sumTypeName + "` `" + branchName.data() + "`");
+        }
+
+        size_t consumed = 0;
+        RamDomain branchValue;
+        switch ((*branchType)[0]) {
+            case 's':
+                branchValue = readStringInRecord(source, pos, &consumed);
+                break;
+            case 'i':
+                branchValue = RamSignedFromString(source.substr(pos), &consumed);
+                break;
+            case 'u':
+                branchValue = ramBitCast(RamUnsignedFromString(source.substr(pos), &consumed));
+                break;
+            case 'f':
+                branchValue = ramBitCast(RamFloatFromString(source.substr(pos), &consumed));
+                break;
+            case 'r':
+                branchValue = readRecord(source, *branchType, pos, &consumed);
+                break;
+            case '+':
+                branchValue = readSum(source, *branchType, pos, &consumed);
+                break;
+            default:
+                fatal("Invalid type attribute");
+                exit(EXIT_FAILURE);
+        }
+        pos += consumed;
+
+        if (_consumed != nullptr) {
+            *_consumed = pos - initial_position;
+        }
+
+        // TODO: This is probably wrong
+        RamDomain tuple = RamDomain(branchIndex);
+        return recordTable.pack(&tuple, branchValue);
     }
 
     RamDomain readStringInRecord(const std::string& source, const size_t pos, size_t* charactersRead) {
@@ -145,6 +225,22 @@ protected:
             throw std::invalid_argument(error.str());
         }
         ++pos;
+    }
+
+    /**
+     * Read the next 'literal' (sequence of non-whitespace), consuming any preceding whitespace.
+     */
+    std::string_view consumeLiteral(const std::string& str, size_t& pos) {
+        consumeWhiteSpace(str, pos);
+        if (pos >= str.length()) {
+            throw std::invalid_argument("Unexpected end of input in record");
+        }
+
+        const size_t bgn = pos;
+        for (; pos < str.length() && !std::isspace(static_cast<unsigned char>(str[pos])); ++pos)
+            ;
+
+        return std::string_view(str.data() + bgn, pos - bgn);
     }
 
     /**

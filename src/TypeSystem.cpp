@@ -27,12 +27,12 @@ void SubsetType::print(std::ostream& out) const {
 
 void UnionType::add(const Type& type) {
     assert(environment.isType(type));
-    elementTypes.push_back(&type);
+    elementTypes.emplace_back(type);
 }
 
 void UnionType::print(std::ostream& out) const {
     out << getName() << " = "
-        << join(elementTypes, " | ", [](std::ostream& out, const Type* type) { out << type->getName(); });
+                     << join(elementTypes, " | ", [](auto&& out, auto&& type) { out << type.get().getName(); });
 }
 
 void RecordType::add(const std::string& name, const Type& type) {
@@ -49,6 +49,16 @@ void RecordType::print(std::ostream& out) const {
     out << "( " << join(fields, " , ", [](std::ostream& out, const RecordType::Field& f) {
         out << f.name << " : " << f.type.getName();
     }) << " )";
+}
+
+void SumType::add(Branch branch) {
+    assert(environment.isType(branch.type));
+    branches.emplace_back(std::move(branch));
+}
+
+void SumType::print(std::ostream& out) const {
+    out << getName() << " = "
+        << join(branches, " | ", [](auto&& os, auto&& br) { os << br.name << " = " << br.type; });
 }
 
 TypeSet TypeEnvironment::initializeConstantTypes() {
@@ -111,6 +121,7 @@ struct TypeVisitor {
         FORWARD(Subset);
         FORWARD(Union);
         FORWARD(Record);
+        FORWARD(Sum);
 
         fatal("Unsupported type encountered!");
     }
@@ -125,6 +136,7 @@ struct TypeVisitor {
     VISIT(Subset)
     VISIT(Union)
     VISIT(Record)
+    VISIT(Sum)
 
     virtual R visitType(const Type& /*type*/) const {
         return R();
@@ -169,8 +181,8 @@ bool isOfRootType(const Type& type, const Type& root) {
             return type == root || isOfRootType(type.getBaseType(), root);
         }
         bool visitUnionType(const UnionType& type) const override {
-            return type == root ||
-                   all_of(type.getElementTypes(), [&](const Type* cur) { return this->visit(*cur); });
+           return type == root ||
+                  all_of(type.getElementTypes(), [&](auto&& cur) { return this->visit(cur); });
         }
 
         bool visitRecordType(const RecordType& type) const override {
@@ -185,25 +197,59 @@ bool isOfRootType(const Type& type, const Type& root) {
     return visitor(root).visit(type);
 }
 
+/* TODO: Next 2 functions must be deleted!!!! */
+bool isUnion(const Type& type) {
+    return isA<UnionType>(type);
+}
+
+bool isSubType(const Type& a, const UnionType& b) {
+    // A is a subtype of b if it is in the transitive closure of b
+    struct visitor : public VisitOnceTypeVisitor<bool> {
+        const Type& target;
+        explicit visitor(const Type& target) : target(target) {}
+
+        bool visitConstantType(const ConstantType& type) const override {
+            return target == type;
+        }
+
+        bool visitSubsetType(const SubsetType& type) const override {
+            //            std::cerr << "type: " << type << " target: " << target << std::endl;
+            if (target == type) {
+                return true;
+            }
+            return this->visit(type.getBaseType());
+        }
+
+        bool visitUnionType(const UnionType& type) const override {
+            //return any_of(type.getElementTypes(), [&](const Type* cur) { return visit(*cur); });
+            return any_of(type.getElementTypes(), [&](auto&& ty) { return visit(ty); });
+        }
+
+        bool visitType(const Type& /*type*/) const override {
+            return false;
+        }
+    };
+
+    return visitor(a).visit(b);
+}
+
 }  // namespace
 
 /* generate unique type qualifier string for a type */
 std::string getTypeQualifier(const Type& type) {
     struct visitor : public VisitOnceTypeVisitor<std::string> {
         std::string visitUnionType(const UnionType& type) const override {
-            std::string str = visitType(type);
-            str += "[";
-            bool first = true;
-            for (auto unionType : type.getElementTypes()) {
-                if (first) {
-                    first = false;
-                } else {
-                    str += ",";
-                }
-                str += visit(*unionType);
-            }
-            str += "]";
-            return str;
+            std::ostringstream output;
+            output << visitType(type) << "["
+                   << join(type.getElementTypes(), ",", [&](auto& os, auto& x) { os << visit(x); }) << "]";
+            return output.str();
+        }
+
+        // TODO: Update SYNTAX!!
+        std::string visitSumType(const SumType& type) const override {
+            return format("%s[%s]", visitType(type), join(type.getBranches(), ";", [&](auto& os, auto& x) {
+                os << x.name << " = " << visit(x.type);
+            }));
         }
 
         std::string visitRecordType(const RecordType& type) const override {
@@ -242,6 +288,9 @@ std::string getTypeQualifier(const Type& type) {
                     break;
                 case TypeAttribute::Record:
                     str.append("r");
+                    break;
+                case TypeAttribute::Sum:
+                    str.append("+");
                     break;
             }
             str.append(":");
@@ -302,6 +351,14 @@ bool isRecordType(const Type& type) {
     return isA<RecordType>(type);
 }
 
+bool isSumType(const Type& type) {
+    return isA<SumType>(type);
+}
+
+bool isSumType(const TypeSet& s) {
+    return !s.empty() && !s.isAll() && all_of(s, (bool (*)(const Type&)) & isSumType);
+}
+
 bool isRecordType(const TypeSet& s) {
     return !s.empty() && !s.isAll() && all_of(s, (bool (*)(const Type&)) & isA<RecordType>);
 }
@@ -309,7 +366,8 @@ bool isRecordType(const TypeSet& s) {
 bool isSubtypeOf(const Type& a, const Type& b) {
     assert(&a.getTypeEnvironment() == &b.getTypeEnvironment() &&
             "Types must be in the same type environment");
-
+/* TODO: Put original code back in */
+/*
     if (isOfRootType(a, b)) {
         return true;
     }
@@ -322,6 +380,29 @@ bool isSubtypeOf(const Type& a, const Type& b) {
     if (isA<UnionType>(b)) {
         return any_of(static_cast<const UnionType&>(b).getElementTypes(),
                 [&a](const Type* type) { return isSubtypeOf(a, *type); });
+    }
+*/
+    auto& environment = a.getTypeEnvironment();
+    assert(environment.isType(a) && environment.isType(b));
+    // sub-type relation is reflexive
+    if (a == b) {
+        return true;
+    }
+
+        // check for predefined types
+    if (isA<PrimitiveType>(b)) {
+        return isOfRootType(a, b);
+    }
+
+    // check primitive type chains
+    if (isA<SubsetType>(a)) {
+        if (isSubtypeOf(as<SubsetType>(a).getBaseType(), b)) {
+            return true;
+        }
+    }
+
+    if (isUnion(b)) {
+        return isSubType(a, as<UnionType>(b));
     }
 
     return false;
@@ -363,7 +444,7 @@ TypeSet getGreatestCommonSubtypes(const Type& a, const Type& b) {
             }
             void visitUnionType(const UnionType& type) const override {
                 for (const auto& cur : type.getElementTypes()) {
-                    visit(*cur);
+                    visit(cur);
                 }
             }
         };

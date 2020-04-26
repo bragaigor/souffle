@@ -100,6 +100,9 @@ protected:
                     case 'f':
                         tuple[inputMap[column]] = ramBitCast(RamFloatFromString(element, &charactersRead));
                         break;
+                    case '+':
+                        tuple[inputMap[column]] = readSum(element, typeAttributes[inputMap[column]]);
+                        break;
                     default:
                         fatal("invalid type attribute: `%c`", ty[0]);
                 }
@@ -149,7 +152,7 @@ protected:
             size_t next_delimiter = line.find(delimiter, start);
 
             // Find first delimiter after the record.
-            while (end < std::min(next_delimiter, line.length()) || record_parens != 0) {
+            while ((end < line.length()) && (end < std::min(next_delimiter, line.length()) || record_parens != 0)) {
                 // Track the number of parenthesis.
                 if (line[end] == '[') {
                     ++record_parens;

@@ -59,6 +59,9 @@ void TypeEnvironmentAnalysis::updateTypeEnvironment(const AstProgram& program) {
         } else if (dynamic_cast<const AstRecordType*>(cur) != nullptr) {
             // initialize the record
             env.createType<RecordType>(cur->getQualifiedName());
+        } else if (dynamic_cast<const AstSumType*>(cur) != nullptr) {
+            // initialize the sum type
+            env.createType<SumType>(cur->getQualifiedName());
         } else {
             fatal("unsupported type construct: %s", typeid(cur).name());
         }
@@ -96,6 +99,19 @@ void TypeEnvironmentAnalysis::updateTypeEnvironment(const AstProgram& program) {
                     rt->add(f.name, env.getType(f.type));
                 }
             }
+        } else if (auto* t = dynamic_cast<const AstSumType*>(cur)) {
+            // get type as sum type
+            auto* st = dynamic_cast<SumType*>(&type);
+            if (!st) {
+                continue;  // support faulty input
+            }
+
+            // add element types
+            for (const auto& cur : t->getBranches()) {
+                if (env.isType(cur.type)) {
+                    st->add({cur.name, env.getType(cur.type)});
+                }
+            }
         } else {
             fatal("unsupported type construct: %s", typeid(cur).name());
         }
@@ -119,9 +135,11 @@ void TypeEnvironmentAnalysis::updateTypeEnvironment(const AstProgram& program) {
                     typeDependencyGraph.insert(type->getQualifiedName(), "symbol");
                     break;
                 case TypeAttribute::Record:
+                case TypeAttribute::Sum:
                     fatal("invalid type");
             }
-        } else if (dynamic_cast<const AstRecordType*>(cur) != nullptr) {
+        } else if ((dynamic_cast<const AstRecordType*>(cur) != nullptr)
+                || (dynamic_cast<const AstSumType*>(cur) != nullptr)) {
             // do nothing
         } else if (auto type = dynamic_cast<const AstUnionType*>(cur)) {
             for (const auto& subtype : type->getTypes()) {
